@@ -161,7 +161,6 @@ for i in (1...100000)
 
 		network.delta_weights.each_with_index do |weight, w|
 			delta_weight_sums[w] += weight.abs
-			delta_weight_sums[w] = delta_weight_sums[w]
 		end
 
 		puts "test case #{j} of epoch #{i} has a max delta_weight of #{delta_weight_sums.max}"
