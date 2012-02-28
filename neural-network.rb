@@ -14,7 +14,7 @@ class Layer
   def initialize
     @neurons = Array.new
   end
-  
+
   def self.new_internal_layer(input_count, out_connections_count)
     new_layer = Layer.new
 
@@ -51,11 +51,11 @@ class Neural_Network
     @hidden_error_values = Array.new
     @delta_weights = Array.new
     @layers = Array.new
-  
+
     @layers << Layer.new_internal_layer(input_count, hidden_count)
 
     bias_neuron = Neuron.new
-    
+
     for k in (0...hidden_count)
       bias_neuron.out_weights[k] = 1.0
       bias_neuron.out_values[k] = 1.0
@@ -76,7 +76,7 @@ class Neural_Network
     1 - (y * y)
   end
 
-  def calculate_error(input, desired_output)
+  def fire_neurons(input)
     input.each_with_index do |value, i|
       for j in (0...@layers[1].neurons.count) do
         @layers[0].neurons[i].input = value.to_f
@@ -98,9 +98,9 @@ class Neural_Network
             @layers[i-1].neurons.each do |prev_neuron|
               sum += prev_neuron.out_values[j] * prev_neuron.out_weights[j]
             end
-            
+
             neuron.input = sum
-              
+
             #activation calculation
             neuron.out_values[cur_output] = activation_function(sum).to_f
             cur_output += 1
@@ -109,16 +109,19 @@ class Neural_Network
       end      
     end
 
-    #set output layer error values
+  end
+  
+  def calculate_errors(desired_output)
+        #set output layer error values
     @layers[2].neurons.each_with_index do |neuron, j|
       @output_error_values[j] = (-(desired_output[j] - neuron.out_values[0]) *
-                  (1 - neuron.out_values[0]) * neuron.out_values[0])
+                                 (1 - neuron.out_values[0]) * neuron.out_values[0])
     end
-
   end
 
-  def learn(desired_output, learning_constant)
 
+
+  def learn(desired_output, learning_constant)
     w_index = 0
     input_layer  = @layers[0]
     hidden_layer = @layers[1]
@@ -127,7 +130,7 @@ class Neural_Network
     hidden_layer.neurons.each_with_index do |neuron, j|
       for i in (0...output_layer.neurons.count)
         @hidden_error_values[j] = (-@output_error_values[i] * (1 - output_layer.neurons[i].out_values[0]) *
-                    output_layer.neurons[i].out_values[0])
+                                   output_layer.neurons[i].out_values[0])
         delta_weights[w_index] = (learning_constant * @output_error_values[i] * neuron.input)
         neuron.out_weights[i] += delta_weights[w_index]
         w_index += 1
@@ -151,12 +154,13 @@ desired_output = [[0, 0], [1, 0], [1, 0], [0, 1], [1, 0], [0, 1], [0, 1], [1, 1]
 network = Neural_Network.new(3, 3, 2)
 
 total_connections = network.layers[0].neurons.count * network.layers[1].neurons.count * 
-          network.layers[2].neurons.count
+  network.layers[2].neurons.count
 for i in (1...100000)
   delta_weight_sums = Array.new(total_connections) { 0.0 }
   for j in (0...input.count)
 
-    network.calculate_error(input[j], desired_output[j])
+    network.fire_neurons(input[j]);
+    network.calculate_errors(desired_output[j])
     network.learn(desired_output[j], 0.05)
 
     network.delta_weights.each_with_index do |weight, w|
