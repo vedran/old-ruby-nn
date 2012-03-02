@@ -1,9 +1,30 @@
+require 'oily_png'
+
+
+def parse_image(filename)
+  image = ChunkyPNG::Image.from_file(filename)
+
+  width = image.width
+  height = image.height
+
+  output = []
+
+  width.times do |x|
+    height.times do |y|
+      output << ((ChunkyPNG::Color.r(image[x, y]) > 0 || ChunkyPNG::Color.g(image[x, y]) > 0 || ChunkyPNG::Color.b(image[x, y]) > 0) ? 1 : 0)
+    end
+  end
+
+  output
+end
+
+
 class Neuron
-  attr_accessor :out_weights, :out_values, :input
+  attr_accessor :out_weights, :output, :input
 
   def initialize
     @out_weights = Array.new
-    @out_values = Array.new
+    @output = 0.0
     @input = 0.0
   end
 end
@@ -18,10 +39,10 @@ class Layer
   def self.new_internal_layer(input_count, out_connections_count)
     new_layer = Layer.new
 
-    for i in (0...input_count)
+    input_count.times do |i|
       new_neuron = Neuron.new
 
-      for j in (0...out_connections_count)
+      out_connections_count.times do |j|
         new_neuron.out_weights[j] = ((2.0 * Random.rand.round(1)).to_f - 1)
       end
 
@@ -34,7 +55,7 @@ class Layer
   def self.new_output_layer(num_neurons)
     output_layer = Layer.new
 
-    for i in (0...num_neurons)
+    num_neurons.times do |i|
       output_layer.neurons << Neuron.new
     end
 
@@ -42,135 +63,152 @@ class Layer
   end
 end
 
-class Neural_Network
+class NeuralNetwork
 
-  attr_reader :layers, :delta_weights
+  attr_reader :layers, :input_layer, :hidden_layer, :output_layer, :output_error_values
 
   def initialize(input_count, hidden_count, output_count)
     @output_error_values = Array.new
     @hidden_error_values = Array.new
-    @delta_weights = Array.new
     @layers = Array.new
 
     @layers << Layer.new_internal_layer(input_count, hidden_count)
 
     bias_neuron = Neuron.new
 
-    for k in (0...hidden_count)
+    hidden_count.times do |k|
       bias_neuron.out_weights[k] = 1.0
-      bias_neuron.out_values[k] = 1.0
+      bias_neuron.output = 1.0
       bias_neuron.input = 1.0
     end
 
-    @layers[0].neurons << bias_neuron
+    #@layers[0].neurons << bias_neuron
 
     @layers << Layer.new_internal_layer(hidden_count, output_count)
     @layers << Layer.new_output_layer(output_count)
+
+    @input_layer = layers[0]
+    @hidden_layer = layers[1]
+    @output_layer = layers[2]
   end
 
   def activation_function(x)
-    result = Math.tanh(x).round(4)
-  end
-
-  def derived_activation_function(y)
-    1 - (y * y)
+    result = 1 / (1 + Math.exp(-x))
   end
 
   def fire_neurons(input)
+    #input layer
     input.each_with_index do |value, i|
-      for j in (0...@layers[1].neurons.count) do
-        @layers[0].neurons[i].input = value.to_f
-        @layers[0].neurons[i].out_values[j] =
-          activation_function(@layers[0].neurons[i].out_weights[j] * value.to_f)
+      @input_layer.neurons[i].input = @input_layer.neurons[i].output = value
+    end
+
+    #hidden layer
+    @hidden_layer.neurons.each_with_index do |neuron, j|
+      sum = 0.0
+
+      @input_layer.neurons.each do |prev_neuron|
+        sum += prev_neuron.output * prev_neuron.out_weights[j]
       end
+
+      neuron.input = sum
+      neuron.output = activation_function(sum).to_f
     end
 
-    for i in (0...@layers.count)
-      @layers[i].neurons.each_with_index do |neuron, j|
-        cur_output = 0
+    #output layer
+    @output_layer.neurons.each_with_index do |neuron, j|
+      sum = 0.0
 
-        next_layer_count = i < @layers.length - 1 ? @layers[i+1].neurons.length : 1
+      @hidden_layer.neurons.each do |prev_neuron|
+        sum += prev_neuron.output * prev_neuron.out_weights[j]
+      end
 
-        if i > 0 && i < @layers.length #hidden and output layer calculations
-          while cur_output < next_layer_count
-            sum = 0.0
-
-            @layers[i-1].neurons.each do |prev_neuron|
-              sum += prev_neuron.out_values[j] * prev_neuron.out_weights[j]
-            end
-
-            neuron.input = sum
-
-            #activation calculation
-            neuron.out_values[cur_output] = activation_function(sum).to_f
-            cur_output += 1
-          end
-        end
-      end      
+      neuron.input = sum
+      neuron.output = activation_function(sum).to_f
     end
-
+    @output_layer.neurons.collect {|n| n.output}
   end
-  
-  def calculate_errors(desired_output)
-        #set output layer error values
-    @layers[2].neurons.each_with_index do |neuron, j|
-      @output_error_values[j] = (-(desired_output[j] - neuron.out_values[0]) *
-                                 (1 - neuron.out_values[0]) * neuron.out_values[0])
-    end
-  end
-
-
 
   def learn(desired_output, learning_constant)
-    w_index = 0
-    input_layer  = @layers[0]
-    hidden_layer = @layers[1]
-    output_layer = @layers[2]
+    #set output layer error values
+    @output_layer.neurons.each_with_index do |neuron, j|
+      @output_error_values[j] = neuron.output * (1 - neuron.output) * 
+        (desired_output[j] - neuron.output)
+    end
 
-    hidden_layer.neurons.each_with_index do |neuron, j|
-      for i in (0...output_layer.neurons.count)
-        @hidden_error_values[j] = (-@output_error_values[i] * (1 - output_layer.neurons[i].out_values[0]) *
-                                   output_layer.neurons[i].out_values[0])
-        delta_weights[w_index] = (learning_constant * @output_error_values[i] * neuron.input)
-        neuron.out_weights[i] += delta_weights[w_index]
-        w_index += 1
+    @hidden_layer.neurons.each_with_index do |neuron, j|
+      error_multiplier = 0.0
+      total_output = 0.0
+      @output_layer.neurons.count.times do |i|
+        error_multiplier += neuron.out_weights[i] * @output_error_values[i]
+        neuron.out_weights[i] += learning_constant * @output_error_values[i] * neuron.output
       end
+      @hidden_error_values[j] = neuron.output * (1 - neuron.output) * error_multiplier
     end
 
     #change input-to-hidden weights
-    input_layer.neurons.each do |neuron|
-      for i in (0...hidden_layer.neurons.count)
-        delta_weights[w_index] = (learning_constant * @hidden_error_values[i] * neuron.input)
-        neuron.out_weights[i] += delta_weights[w_index]
-        w_index += 1
+    @input_layer.neurons.each do |neuron|
+      @hidden_layer.neurons.count.times do |i|
+        neuron.out_weights[i] += learning_constant * @hidden_error_values[i] * neuron.input
       end
     end
   end
 end
 
 #2-bit adder
-input = [[0, 0, 0], [0, 0, 1], [0, 1, 0], [0, 1, 1], [1, 0, 0], [1, 0, 1], [1, 1, 0], [1, 1, 1]]
-desired_output = [[0, 0], [1, 0], [1, 0], [0, 1], [1, 0], [0, 1], [0, 1], [1, 1]]
-network = Neural_Network.new(3, 3, 2)
 
-total_connections = network.layers[0].neurons.count * network.layers[1].neurons.count * 
-  network.layers[2].neurons.count
-for i in (1...100000)
-  delta_weight_sums = Array.new(total_connections) { 0.0 }
-  for j in (0...input.count)
+input = []
+desired_output = []
 
-    network.fire_neurons(input[j]);
-    network.calculate_errors(desired_output[j])
-    network.learn(desired_output[j], 0.05)
+#add circles to test data
+8.times do |i|
+  puts i
+  input << parse_image('data/circle-' + i.to_s + '.png')
+  input << parse_image('data/square-' + i.to_s + '.png')
+  desired_output << [1, 0, 0]
+  desired_output << [0, 1, 0]
+end
 
-    network.delta_weights.each_with_index do |weight, w|
-      delta_weight_sums[w] += weight.abs
+puts "load weights? (y/n): "
+choice = gets.chomp
+if(choice == "y")
+  if File.exists?("weights")
+    weights_file = File.open("weights", "r")
+    network = Marshal.load(File.binread("weights"))
+  else 
+    puts "Unable to load weights file!"
+  end
+end
+
+#if loading the file failed and the network is nil, create a blank one
+network ||= NeuralNetwork.new(256, 256, 3)
+
+total_connections = network.input_layer.neurons.count * network.hidden_layer.neurons.count * 
+  network.output_layer.neurons.count
+
+max_error = 0.0
+learning_constant = 0.005
+
+1000000.times do |i|
+  last_error = max_error
+  max_error = 0.0
+
+  input.count.times do |j|
+    network.fire_neurons(input[j])
+    network.learn(desired_output[j], learning_constant)#`0.055)
+
+    desired_output[j].count.times do |k|
+      error = (network.output_layer.neurons[k].output - desired_output[j][k]).abs
+      if error > max_error
+        max_error = error
+      end
     end
-
-    puts "test case #{j} of epoch #{i} has a max delta_weight of #{delta_weight_sums.max}"
   end
 
-  if delta_weight_sums.max <= 0.0005
+  puts "epoch " + i.to_s
+  puts "Max Error: " + max_error.to_s
+  
+
+  if max_error < 5e-7 
     puts "learned successfully!"
     break
   end
@@ -178,10 +216,19 @@ end
 
 puts "finished learning attempts"
 
-puts
-puts network.layers[0].inspect
-puts
-puts network.layers[1].inspect
-puts
-puts network.layers[2].inspect
-puts
+gets
+
+puts "Tests:"
+
+input.count.times do |j|
+  puts "Expected: " + desired_output.inspect + ", Got: " + network.fire_neurons(input[j]).inspect
+  puts "Neurons: " + network.output_layer.inspect
+end
+
+puts "Override saved weights data?(y/n):" 
+choice = gets.chomp
+
+if(choice == "y")
+  weights_file = File.new("weights", "wb")
+  weights_file.puts Marshal.dump(network)
+end
